@@ -188,21 +188,38 @@ def _recompose_prompt(
     compose: Callable[[Path, Path, Path], int] = _compose_system_prompt,
 ) -> bool:
     """Recompose the workspace prompt, replacing it only when content changed."""
-    target_prompt.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        dir=str(target_prompt.parent), prefix=".compose-agents-"
-    )
-    os.close(fd)
+    try:
+        target_prompt.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            dir=str(target_prompt.parent), prefix=".compose-agents-"
+        )
+        os.close(fd)
+    except OSError as exc:
+        print(f"warning: failed to stage prompt recomposition: {exc}", file=sys.stderr)
+        return False
     temp_path = Path(temp_name)
     try:
         if compose(home_dir, repo_mount, temp_path) != 0:
             print("warning: compose-system-prompt failed", file=sys.stderr)
             return False
-        if target_prompt.is_file() and target_prompt.read_bytes() == temp_path.read_bytes():
+        if temp_path.stat().st_size == 0:
+            # compose wrote nothing (no base prompt inputs); leave any existing
+            # target untouched rather than clobbering it with an empty file.
+            return True
+        if (
+            target_prompt.is_file()
+            and target_prompt.read_bytes() == temp_path.read_bytes()
+        ):
             return True
         os.chmod(temp_path, 0o644)
         os.replace(temp_path, target_prompt)
         return True
+    except OSError as exc:
+        print(
+            f"warning: failed to replace prompt at {target_prompt}: {exc}",
+            file=sys.stderr,
+        )
+        return False
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -299,13 +316,7 @@ def watch_repo_cache(
 
 
 def main() -> int:
-    home_dir = Path.home()
-    return watch_repo_cache(
-        _split_paths(os.environ.get("TOOL_DIRS", "")),
-        home_dir=home_dir,
-        repo_mount=home_dir / "github",
-        workspace_dir=_workspace_dir(),
-    )
+    return watch_repo_cache(_split_paths(os.environ.get("TOOL_DIRS", "")))
 
 
 if __name__ == "__main__":

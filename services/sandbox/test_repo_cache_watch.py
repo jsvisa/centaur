@@ -254,7 +254,50 @@ class PromptRecomposeTest(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertEqual(list(root.joinpath("workspace").iterdir()), [])
 
-    def test_recompose_if_changed_advances_and_retries_after_failure(self) -> None:
+    def test_recompose_prompt_keeps_target_on_empty_compose_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "workspace" / "AGENTS.md"
+            target.parent.mkdir(parents=True)
+            target.write_text("previously composed\n")
+            calls: list[Path] = []
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                recomposed = repo_cache_watch._recompose_prompt(
+                    root / "home",
+                    root / "github",
+                    target,
+                    _compose_stub("", calls),
+                )
+            self.assertTrue(recomposed)
+            self.assertEqual(target.read_text(), "previously composed\n")
+
+    def test_recompose_prompt_survives_replace_oserror(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "workspace" / "AGENTS.md"
+            # A directory at the target path makes os.replace raise
+            # IsADirectoryError (an OSError subclass).
+            target.mkdir(parents=True)
+            calls: list[Path] = []
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                recomposed = repo_cache_watch._recompose_prompt(
+                    root / "home",
+                    root / "github",
+                    target,
+                    _compose_stub("prompt v1\n", calls),
+                )
+            self.assertFalse(recomposed)
+            self.assertTrue(target.is_dir())
+            leftovers = [p for p in root.joinpath("workspace").iterdir()]
+            self.assertEqual(
+                leftovers,
+                [target],
+                "failed recomposition must clean up its temp file",
+            )
+
+    def test_recompose_if_changed_advances_and_skips_when_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             home_dir = root / "home"
@@ -302,6 +345,43 @@ class PromptRecomposeTest(unittest.TestCase):
             self.assertTrue(recomposed)
             self.assertEqual(len(calls), 2)
             self.assertEqual(target.read_text(), "prompt v2\n")
+
+    def test_recompose_if_changed_retries_after_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home_dir = root / "home"
+            repo_mount = root / "github"
+            home_dir.mkdir()
+            repo_mount.mkdir()
+            (home_dir / "AGENTS.md").write_text("baked\n")
+            target = root / "workspace" / "AGENTS.md"
+            calls: list[Path] = []
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                applied, recomposed = repo_cache_watch._recompose_if_changed(
+                    home_dir,
+                    repo_mount,
+                    target,
+                    None,
+                    observability_enabled=True,
+                    compose=lambda home_dir, repo_mount, target: 1,
+                )
+            self.assertFalse(recomposed)
+            self.assertIsNone(applied)
+            self.assertFalse(target.exists())
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                applied, recomposed = repo_cache_watch._recompose_if_changed(
+                    home_dir,
+                    repo_mount,
+                    target,
+                    applied,
+                    observability_enabled=True,
+                    compose=_compose_stub("prompt v1\n", calls),
+                )
+            self.assertTrue(recomposed)
+            self.assertIsNotNone(applied)
+            self.assertEqual(target.read_text(), "prompt v1\n")
 
     def test_recompose_if_changed_skips_without_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
