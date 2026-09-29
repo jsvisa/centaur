@@ -133,7 +133,7 @@ Shape:
 | `control_plane`       | — (no config keys)     | —                           | Value is supplied inline; see below. |
 | `token_broker`        | `credential_id`        | —                           | A managed [broker credential](#broker-credentials); see below. |
 
-`vault_kv` addresses the entry `mount/path`. The proxy resolves the **whole** KV entry as JSON, so set `json_key` to select a single field; without it the injected value is the entire JSON document. `kv_version` defaults to `2` and must be `1` or `2`.
+`vault_kv` addresses the entry `mount/path`. The proxy resolves the **whole** KV entry as JSON, so set `json_key` to select a single field; without it the injected value is the entire JSON document. `kv_version` must be the JSON integer `1` or `2`; omit it (or send `null`) to use `2`. A string or float is rejected on write rather than failing later at proxy sync.
 
 `control_plane` is special: the value is stored in iron-control itself. Supply it as a top-level `secret` field on the source (not inside `config`), and leave `config` empty:
 
