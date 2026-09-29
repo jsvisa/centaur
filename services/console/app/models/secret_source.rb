@@ -112,6 +112,7 @@ class SecretSource < ApplicationRecord
   validates :source_type, presence: true, inclusion: { in: SOURCE_TYPES }
   validate :config_is_a_hash
   validate :config_matches_source_type
+  validate :kv_version_is_a_supported_engine
   validate :secret_matches_source_type
   validate :at_most_one_owner
   validate :role_matches_owner
@@ -196,6 +197,19 @@ class SecretSource < ApplicationRecord
     (keys - allowed).each do |unknown|
       errors.add(:config, "has unknown key #{unknown.inspect} for source_type #{source_type.inspect}")
     end
+  end
+
+  # iron-proxy decodes vault_kv's kv_version as a YAML int and rejects anything
+  # but 1 or 2, so a JSON string or float would fail at sync time with a parse
+  # error naming no config key. Catch it on write instead. An absent or null
+  # value leaves the proxy on its default (2), so both are allowed.
+  def kv_version_is_a_supported_engine
+    return unless source_type == "vault_kv" && config.is_a?(Hash)
+
+    version = config["kv_version"]
+    return if version.nil? || (version.is_a?(Integer) && [ 1, 2 ].include?(version))
+
+    errors.add(:config, "kv_version must be the integer 1 or 2 for source_type \"vault_kv\", got #{version.inspect}")
   end
 
   def secret_matches_source_type
