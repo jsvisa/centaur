@@ -94,6 +94,16 @@ module Console
       assert_response :ok
       assert_select "select[name='source[source_type]'] option[value=vault_kv]", count: 1
       assert_select "input[name='source[mount]']", count: 1
+      # The Stimulus controller only reveals the mount input for the types in
+      # this value, so a rename here would silently hide the field.
+      assert_select "[data-controller='source-fields'][data-source-fields-mount-types-value]", count: 1
+    end
+
+    test "editing a vault_kv secret pre-fills its mount and path" do
+      get edit_console_static_secret_url(static_secrets(:acme_vault_api_key).oid)
+      assert_response :ok
+      assert_select "input[name='source[mount]'][value=?]", "secret", count: 1
+      assert_select "input[name='source[reference]'][value=?]", "prod/app/api-key", count: 1
     end
 
     test "POST create with no inject or replace is rejected without writing" do
